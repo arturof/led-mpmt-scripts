@@ -5,7 +5,7 @@ import sys
 import time
 import argparse
 
-sys.path.append('./x_feb_access')
+sys.path.append('/root/led-mpmt-scripts/x_feb_access')
 from reg_map import Basic_RW
 from x_feb import xFEB_Modbus
 
@@ -29,14 +29,6 @@ burst_4ns   = args.burst_4ns
 flash_n     = int(args.flash_n)
 flash_i     = int(args.flash_i*250)
 
-#led_feb_num = 3 # LED-FEB number 0, 1, 2, 3, 4
-#led_num     = 4 # LED 0(c470), 1(c405), 2(c365), 3(c295), 4(d470), 5(d405), 6(d365), 7(all)
-#led_bias    = 5 # LED bias voltage (min:2.02V max:15.28V)
-#burst_s     = 3 # start time in seconds from current time (register 45)
-#burst_4ns   = 0 # start time 4ns component
-#flash_n     = int(1e5) # number of flashes in a burst
-#flash_i     = int(250*10) # time between flashes in 4ns units (min:250=1us)
-
 print(f"LED-FEB {led_feb_num} LED {led_num} will be set to start in {burst_s}s+{burst_4ns*4}ns")
 
 # power enable all LED-FEBs (reg 1) for x_feb to work properly
@@ -47,6 +39,9 @@ ispmt_mask = my_run_ctr.ReadReg(103)
 isled_mask = ~ispmt_mask & 0x7ffff
 print(f'ispmt             {ispmt_mask:019b}')
 print(f'isled             {isled_mask:019b}')
+if (ispmt_mask == 0x7ffff) :
+  print('No LED-FEB in firmware')
+  sys.exit(1)
 
 print('Power disabling all LED-FEBs')
 reg1 = my_run_ctr.ReadReg(1) & ispmt_mask # do not change PMTs
@@ -123,40 +118,36 @@ burst_4ns_read = my_run_ctr.ReadReg(70 + led_feb_num)
 flash_i_read   = my_run_ctr.ReadReg(75 + led_feb_num)
 flash_n_read   = my_run_ctr.ReadReg(80 + led_feb_num)
 
-# print burst parameters in binary and decimal representations
+# print burst parameters
 print(f"burst timestamp     = {burst_s_read}")
 print(f"burst timestamp 4ns = {burst_4ns_read}")
 print(f"flash interval      = {4*flash_i_read/1e3}us")
 print(f"number of flashes   = {flash_n_read:e}")
-#print(f"W burst timestamp     = {(current_time + burst_s):032b} {current_time + burst_s}")
-#print(f"R burst timestamp     = {burst_s_read:032b} {burst_s_read}")
-#print(f"W burst timestamp 4ns = {burst_4ns:032b} {burst_4ns}")
-#print(f"R burst timestamp 4ns = {burst_4ns_read:032b} {burst_4ns_read}")
-#print(f"W flash interval      = {flash_i:032b} {flash_i}")
-#print(f"R flash interval      = {flash_i_read:032b} {flash_i_read}")
-#print(f"W number of flashes   = {flash_n:032b} {flash_n}")
-#print(f"R number of flashes   = {flash_n_read:032b} {flash_n_read}")
 
 # just clear any previous command if any
 my_run_ctr.WriteReg(101, 0x2 << (2*led_feb_num))
 
 # write key to start LED-FEB FSM
+# and check status
 key = my_run_ctr.ReadReg(90 + led_feb_num)
 print(f"Writing key = {key}")
 my_run_ctr.WriteReg(95 + led_feb_num, key)
-
-# check status of LED-FEB FSM after writing key
+time.sleep(1) # seems that it is needed for status to update?
 status = (my_run_ctr.ReadReg(100) >> (2*led_feb_num)) & 0x3
-time_now = my_run_ctr.ReadReg(45)
-print(f"Initial time = {time_now}")
 print(f"Status = {status}")
 
-while (status != 0x0) :
+# monitor FSM
+time_now = my_run_ctr.ReadReg(45)
+print(f"Initial time = {time_now}")
+time_end = (burst_s_read+flash_n_read*flash_i_read*4e-9)+5
+print(f"Wait until =   {int(time_end)}")
+while (status != 0x0 and time_now<=time_end) :
 
   # check timestamp and status
-  if status == 0x1 :
-    print("Waiting on timestamp or burst in progress")
-  elif status == 0x2 :
+  #if status == 0x1 :
+  #  print("Waiting on timestamp or burst in progress")
+  #elif status == 0x2 :
+  if status == 0x2 :
     print("Error")
     my_run_ctr.WriteReg(101, (0x2 << (2*led_feb_num))) # clear error
 
@@ -164,9 +155,11 @@ while (status != 0x0) :
   time.sleep(1)
   status = (my_run_ctr.ReadReg(100) >> (2*led_feb_num)) & 0x3
   time_now = my_run_ctr.ReadReg(45)
-  print(f"Current timestamp = {time_now}")
+  #print(f"Current time = {time_now}")
 
+time_now = my_run_ctr.ReadReg(45)
 print(f"Finished with status = {status}")
+print(f"Final time = {time_now}")
 
 # power off LED-FEB
 print(f"Powering off LED-FEB {led_feb_address}")

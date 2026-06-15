@@ -31,29 +31,34 @@ flash_i     = int(args.flash_i*250)
 
 print(f"LED-FEB {led_feb_num} LED {led_num} will be set to start in {burst_s}s+{burst_4ns*4}ns")
 
-# power enable all LED-FEBs (reg 1) for x_feb to work properly
-# but activate only one LED-FEB (reg 0)
+# get PMT and LED channel masks
 my_run_ctr = Basic_RW()
-
 ispmt_mask = my_run_ctr.ReadReg(103)
 isled_mask = ~ispmt_mask & 0x7ffff
-print(f'ispmt             {ispmt_mask:019b}')
-print(f'isled             {isled_mask:019b}')
+#print(f'ispmt             {ispmt_mask:019b}')
+#print(f'isled             {isled_mask:019b}')
 if (ispmt_mask == 0x7ffff) :
   print('No LED-FEB in firmware')
   sys.exit(1)
 
+# power disable (reg 1) all LED-FEBs
+# and deactivate (reg 0) all LED-FEBs to not go in boot mode later
+# do not change any PMT
 print('Power disabling all LED-FEBs')
-reg1 = my_run_ctr.ReadReg(1) & ispmt_mask # do not change PMTs
+reg1 = my_run_ctr.ReadReg(1) & ispmt_mask
+reg0 = my_run_ctr.ReadReg(0) & ispmt_mask
 my_run_ctr.WriteReg(1, reg1)
-reg0 = my_run_ctr.ReadReg(0) & ispmt_mask # do not change PMTs
-my_run_ctr.WriteReg(0, reg0) # avoid led-feb to go in boot mode
-print(f'Register 0        {my_run_ctr.ReadReg(0):019b}')
-print(f'Register 1        {my_run_ctr.ReadReg(1):019b}')
+my_run_ctr.WriteReg(0, reg0)
+#print(f'Register 0        {my_run_ctr.ReadReg(0):019b}')
+#print(f'Register 1        {my_run_ctr.ReadReg(1):019b}')
 time.sleep(1)
 
+# power enable (reg 1) all LED-FEBs
+# activate (reg 0) only one LED-FEB
+# do it like this for x_feb to work properly
+# do not change any PMT
 print(f'Power enabling all LED-FEBs and activating LED-FEB  {led_feb_num}')
-reg1 = my_run_ctr.ReadReg(1) | isled_mask # do not change PMTs
+reg1 = my_run_ctr.ReadReg(1) | isled_mask
 my_run_ctr.WriteReg(1, reg1)
 time.sleep(1)
 
@@ -61,21 +66,21 @@ led_feb_address = (my_run_ctr.ReadReg(102) >> 5*led_feb_num) & 0x1f
 reg0 = my_run_ctr.ReadReg(0)
 my_run_ctr.WriteReg(0, reg0 | 1 << led_feb_address)
 print(f'Activated LED-FEB address {led_feb_address}')
-print(f'Register 0        {my_run_ctr.ReadReg(0):019b}')
-print(f'Register 1        {my_run_ctr.ReadReg(1):019b}')
+#print(f'Register 0        {my_run_ctr.ReadReg(0):019b}')
+#print(f'Register 1        {my_run_ctr.ReadReg(1):019b}')
 time.sleep(1)
 
 # power on and configure LED-FEB
 my_device = xFEB_Modbus()
 my_n_led_febs = my_device.get_n_led_febs()
 print(f'Number of power enabled LED-FEBs: {my_n_led_febs}')
-# all 5 LED-FEBs has to be enabled for x_feb to work properly
+# all 5 LED-FEBs have to be enabled for x_feb to work properly
 # otherwise quit here
 if (my_n_led_febs != 5) :
   sys.exit(1)
 led_feb_id = led_feb_num
 
-print(f'Powering on LED-FEB {led_feb_id}')
+print(f'Powering LED-FEB {led_feb_id}')
 while (my_device.power_on(led_feb_id)==False) :
   print('Waiting for power_on')
   time.sleep(1)
@@ -86,6 +91,7 @@ my_device.set_main_board_trig(led_feb_id)
 my_device.trig_enable(led_feb_id)
 my_device.led_bias_enable(led_feb_id)
 my_device.set_led_bias(led_feb_id,led_bias)
+
 print(f'DAC level: {my_device.get_led_bias(led_feb_id)}')
 print(my_device.fetch_trig_source(led_feb_id))
 print(my_device.fetch_led_bias(led_feb_id))
@@ -127,8 +133,9 @@ print(f"number of flashes   = {flash_n_read:e}")
 # just clear any previous command if any
 my_run_ctr.WriteReg(101, 0x2 << (2*led_feb_num))
 
-# write key to start LED-FEB FSM
-# and check status
+# write key to start LED-FEB FSM  and check status
+status = (my_run_ctr.ReadReg(100) >> (2*led_feb_num)) & 0x3
+print(f"Status = {status}")
 key = my_run_ctr.ReadReg(90 + led_feb_num)
 print(f"Writing key = {key}")
 my_run_ctr.WriteReg(95 + led_feb_num, key)
@@ -159,7 +166,7 @@ while (status != 0x0 and time_now<=time_end) :
 
 time_now = my_run_ctr.ReadReg(45)
 print(f"Finished with status = {status}")
-print(f"Final time = {time_now}")
+print(f"Final time =   {time_now}")
 
 # power off LED-FEB
 print(f"Powering off LED-FEB {led_feb_address}")
@@ -174,5 +181,5 @@ reg0 = my_run_ctr.ReadReg(0) & ispmt_mask
 reg1 = my_run_ctr.ReadReg(1) & ispmt_mask
 my_run_ctr.WriteReg(0, reg0)
 my_run_ctr.WriteReg(1, reg1)
-print(f'Register 0        {my_run_ctr.ReadReg(0):019b}')
-print(f'Register 1        {my_run_ctr.ReadReg(1):019b}')
+#print(f'Register 0        {my_run_ctr.ReadReg(0):019b}')
+#print(f'Register 1        {my_run_ctr.ReadReg(1):019b}')
